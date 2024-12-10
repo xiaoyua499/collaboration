@@ -5,20 +5,24 @@
       <span id="status-span">Not Connected</span>
     </p>
     <div v-for="item in tinymceList" :key="item.id" :id="item.id" class="editor-container">
-      <!-- 显示其他用户光标 -->
+      
+    </div>
+    <!-- 显示其他用户光标 -->
       <span
-        v-for="(cursor, userId) in cursors"
-        :key="userId"
+        v-for="(cursor,index) in cursors"
+        :key="index"
         :style="cursor.style"
         class="cursor-marker"
       >👆</span>
-    </div>
   </div>
 </template>
 
 <script>
 import sharedb from 'sharedb/lib/client';
+import richText from 'rich-text'; // 引入 rich-text 类型
 import Editor from '@tinymce/tinymce-vue';
+
+sharedb.types.register(richText.type); // 注册 rich-text 类型
 
 export default {
   name: 'ShareDBEditor',
@@ -32,7 +36,7 @@ export default {
       doc: null,
       presence: null,
       isConnected: false,
-      cursors: {}, // 用于存储其他用户的光标位置
+      cursors: [], // 存储其他用户的光标位置
       tinymceInit: {
         height: 500,
         skin_url: '/tinymce/skins/ui/oxide',
@@ -41,24 +45,28 @@ export default {
             // 实时同步编辑器内容
             this.onInputChange(editor.id, editor.getContent());
           });
-          editor.on('mousemove', (event) => {
-            this.updateCursorPosition(editor.id, event);
-          });
+          editor.on('mousemove',(e)=>{
+            this.handleMouseMove(e)
+          })
         },
       },
       tinymceList: [
         { id: 'editor1' },
-        { id: 'editor2' },
+        // { id: 'editor2' },
       ],
+      cursorDoc: null,
+      userId: null,
     };
   },
   mounted() {
     this.initTinymce();
     this.initWebSocket();
     this.initShareDB();
+    // 全局监听鼠标移动事件
+    window.addEventListener('mousemove', this.handleMouseMove);
   },
   methods: {
-    // 初始化 WebSocket，手动实现自动重连
+    // 初始化 WebSocket
     initWebSocket() {
       const statusSpan = document.getElementById('status-span');
       this.socket = new WebSocket('ws://localhost:8080');
@@ -85,11 +93,13 @@ export default {
         if (this.isConnected) {
           clearInterval(interval);
           this.connection = new sharedb.Connection(this.socket);
-          this.doc = this.connection.get('examples', 'textarea');
+          this.doc = this.connection.get('examples', 'richtext');
           this.doc.subscribe((err) => {
             if (err) throw err;
 
-            this.initPresence(); // 初始化 Presence
+            if (!this.doc.type) {
+              this.doc.create({ content: '' }, 'json0');
+            }
 
             this.tinymceList.forEach((tiny) => {
               const content = this.doc.data[tiny.id] || '';
@@ -98,82 +108,82 @@ export default {
 
               this.doc.on('op', () => {
                 if (editor.getContent() !== this.doc.data[tiny.id]) {
-                  editor.setContent(this.doc.data[tiny.id]);
+                  console.log(this.doc.data);
+
+                  if (this.doc.data[tiny.id]) {
+                    editor.setContent(this.doc.data[tiny.id])
+                  }
                 }
               });
             });
           });
+          // 初始化 rich-text 文档（光标位置）
+          this.cursorDoc = this.connection.get('rich-docs', 'cursor-data');
+          this.cursorDoc.subscribe((err) => {
+            if (err) throw err;
+            if (!this.cursorDoc.type) {
+              this.cursorDoc.create([{ insert: '' }], 'rich-text');
+            }
+            this.initPresence();
+          });
         }
       }, 500);
+
     },
 
+    // 初始化 Presence
     initPresence() {
 
-      // 获取 Presence 对象
-      this.presence = this.doc.connection.getDocPresence(this.doc.collection, this.doc.id);
+      this.presence = this.cursorDoc.connection.getDocPresence(this.cursorDoc.collection, this.cursorDoc.id);
+      this.presence.subscribe()
+      this.localPresence = this.presence.create();
 
-      // 初始化 LocalPresence 对象
-      this.localPresence = this.presence.create()
-      // // 提交当前用户的 Presence 数据
-      this.localPresence.submit({
-        cursor: {
-          editorId: 'editor1',  // 编辑器 ID
-          top: 0,               // 初始光标位置
-          left: 0,
-          color: this.getRandomColor(), // 光标颜色
-        },
-      }, (err) => {
-        if (err) console.error('提交 Presence 数据失败:', err);
-      });
-      console.log(this.localPresence);
-
-      // 监听其他用户的 Presence 数据
-      this.presence.on('receive', (userId, presenceData) => {
-        if (presenceData && presenceData.cursor) {
-          this.$set(this.cursors, userId, {
-            style: {
-              position: 'absolute',
-              top: `${presenceData.cursor.top}px`,
-              left: `${presenceData.cursor.left}px`,
-              color: presenceData.cursor.color,
-            },
-          });
-        } else {
-          this.$delete(this.cursors, userId);
+      this.localPresence.submit(
+        { cursor: { editorId: 'editor1', top: 0, left: 0, color: this.getRandomColor() } },
+        (err) => {
+          if (err) console.error('提交 Presence 数据失败:', err);
         }
+      );
+
+      this.presence.on('receive', (userId, presenceData) => {
+        console.log(userId, presenceData);
+
+        if (presenceData && presenceData.cursor) {
+          let found = false;
+          for (let i = 0; i < this.cursors.length; i++) {
+            if (this.cursors[i].id === userId) {
+              // 如果找到相同的 userId，更新 cursor 数据
+              this.cursors[i].style = {
+                position: 'absolute',
+                top: `${presenceData.cursor.top}px`,
+                left: `${presenceData.cursor.left}px`,
+                color: presenceData.cursor.color,
+              };
+              found = true;
+              break;
+            }
+          }
+
+          if (!found) {
+            // 如果没有找到相同的 userId，添加新的 cursor 数据
+            this.cursors.push({
+              id: userId,
+              style: {
+                position: 'absolute',
+                top: `${presenceData.cursor.top}px`,
+                left: `${presenceData.cursor.left}px`,
+                color: presenceData.cursor.color,
+              },
+            });
+          }
+        }
+
+        console.log(this.cursors);
+
       });
     },
 
-    updateCursorPosition(editorId, event) {
-      const rect = event.target.getBoundingClientRect();
-      const top = event.clientY - rect.top;
-      const left = event.clientX - rect.left;
-
-      // if (this.localPresence) {
-      //   this.localPresence.submit({
-      //     cursor: {
-      //       editorId,
-      //       top,
-      //       left,
-      //       color: this.getRandomColor(),
-      //     },
-      //   }, (err) => {
-      //     if (err) console.error('更新光标位置失败:', err);
-      //   });
-      // }
-    },
-
-    // 获取随机颜色
-    getRandomColor() {
-      const letters = '0123456789ABCDEF';
-      let color = '#';
-      for (let i = 0; i < 6; i++) {
-        color += letters[Math.floor(Math.random() * 16)];
-      }
-      return color;
-    },
-
-    // 手动实现输入事件监听
+    // 提交输入内容
     onInputChange(id, value) {
       if (this.doc) {
         const newContent = value;
@@ -192,6 +202,32 @@ export default {
         });
       });
     },
+
+    // 获取随机颜色
+    getRandomColor() {
+      const letters = '0123456789ABCDEF';
+      let color = '#';
+      for (let i = 0; i < 6; i++) {
+        color += letters[Math.floor(Math.random() * 16)];
+      }
+      return color;
+    },
+    handleMouseMove(event) {
+      const top = event.clientY; // 鼠标在页面中的垂直坐标
+      const left = event.clientX; // 鼠标在页面中的水平坐标
+
+      if (this.localPresence) {
+        this.localPresence.submit({
+          cursor: {
+            top,
+            left,
+            color: this.getRandomColor(), // 光标颜色
+          },
+        }, (err) => {
+          if (err) console.error('更新光标位置失败:', err);
+        });
+      }
+    },
   },
   beforeDestroy() {
     if (this.socket) {
@@ -200,6 +236,8 @@ export default {
     if (this.connection) {
       this.connection.close();
     }
+    // 移除全局鼠标事件监听
+    window.removeEventListener('mousemove', this.handleMouseMove);
   },
 };
 </script>

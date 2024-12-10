@@ -10,6 +10,7 @@
     "@tinymce/tinymce-vue": "3.0.1",
     "core-js": "^3.8.3",
     "reconnecting-websocket": "^4.4.0",
+    "rich-text": "^4.1.0",
     "sharedb": "^5.1.1",
     "tinymce": "^5",
     "vue": "^2.6.14",
