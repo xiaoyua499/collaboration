@@ -1,6 +1,6 @@
 <template>
   <div class="home">
-    <TinyMceEditor11 />
+    <TinyMceEditor />
   </div>
 </template>
 
