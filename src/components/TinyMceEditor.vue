@@ -9,20 +9,11 @@
 </template>
 
 <script>
-import sharedb from 'sharedb/lib/client';
-import Editor from '@tinymce/tinymce-vue'
-import { initWebSocket, initShareDB, onInputChange,socketDestroy } from '@/services/services'
+import { initWebSocket, initShareDB, onInputChange, socketDestroy } from '@/services/services'
 export default {
   name: 'ShareDBEditor',
-  components: {
-    Editor
-  },
   data() {
     return {
-      socket: null,
-      connection: null,
-      doc: null,
-      isConnected: false,
       tinymceInit: {
         height: 500,
         skin_url: '/tinymce/skins/ui/oxide',
@@ -45,22 +36,26 @@ export default {
     };
   },
   mounted() {
+
     this.init()
   },
   methods: {
     init() {
+
       this.initTinymce()
-      initWebSocket();
-      initShareDB(this.tinymceList);
+      
     },
     //初始化tinymce
     initTinymce() {
-      this.tinymceList.forEach(tiny => {
-        tinymce.init({
-          selector: `#${tiny.id}`,
-          ...this.tinymceInit
-        });
+      this.$nextTick(() => {
+        this.tinymceList.forEach(tiny => {
+          tinymce.init({
+            selector: `#${tiny.id}`,
+            ...this.tinymceInit
+          });
+        })
       })
+
     },
   },
   beforeDestroy() {
